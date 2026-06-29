@@ -166,7 +166,7 @@
 
     </main>
 
-    <script>
+    <!-- <script>
         // --- MOCK DATABASE (What your PostgreSQL + pgvector will eventually hold) ---
 
         const mockPolicies = [
@@ -371,6 +371,215 @@
                         <div class="text-sm text-slate-600 flex justify-between items-center border-t border-slate-100 pt-3">
                             <span>Historically approved claims:</span>
                             <span class="font-bold ${parseFloat(hosp.claimsRatio) > 90 ? 'text-green-600' : 'text-orange-600'}">${hosp.claimsRatio}</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+    </script>
+</body>
+</html> -->
+
+<script>
+        // --- 1. API CONNECTION CONFIGURATION ---
+        // This MUST match the URL your FastAPI server is running on
+        const API_BASE = "http://127.0.0.1:8000";
+
+        // --- UI TOGGLE LOGIC ---
+        function switchMode(mode) {
+            const btnUninsured = document.getElementById('btn-uninsured');
+            const btnInsured = document.getElementById('btn-insured');
+            const formUninsured = document.getElementById('form-uninsured');
+            const formInsured = document.getElementById('form-insured');
+            const results = document.getElementById('results-container');
+            
+            results.classList.add('hidden');
+
+            if (mode === 'uninsured') {
+                btnUninsured.className = 'px-6 py-2 rounded-lg text-sm font-semibold bg-white text-slate-900 shadow-sm transition-all';
+                btnInsured.className = 'px-6 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:text-slate-900 transition-all';
+                formUninsured.classList.remove('hidden');
+                formInsured.classList.add('hidden');
+            } else {
+                btnInsured.className = 'px-6 py-2 rounded-lg text-sm font-semibold bg-white text-slate-900 shadow-sm transition-all';
+                btnUninsured.className = 'px-6 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:text-slate-900 transition-all';
+                formInsured.classList.remove('hidden');
+                formUninsured.classList.add('hidden');
+            }
+        }
+
+        // --- 2. LIVE FETCH LOGIC ---
+        async function runEngine(mode) {
+            // Hide forms and show the loader
+            document.getElementById('form-uninsured').classList.add('hidden');
+            document.getElementById('form-insured').classList.add('hidden');
+            document.getElementById('results-container').classList.add('hidden');
+            
+            const loader = document.getElementById('loading-state');
+            const loaderText = document.getElementById('loading-text');
+            loader.classList.remove('hidden');
+
+            // Fun loading text rotation to make it feel like AI
+            let step = 0;
+            const steps = [
+                "Extracting user parameters...",
+                "Running vector search on policy database...",
+                "Evaluating room rent and waiting period traps...",
+                "Formatting final JSON recommendation..."
+            ];
+            const interval = setInterval(() => {
+                if (step < steps.length) {
+                    loaderText.innerText = steps[step];
+                    step++;
+                }
+            }, 600);
+
+            try {
+                if (mode === 'uninsured') {
+                    // Gather input
+                    const payload = {
+                        age: parseInt(document.getElementById('u-age').value) || 30,
+                        budget: parseInt(document.getElementById('u-budget').value) || 15000,
+                        condition: document.getElementById('u-ped').value
+                    };
+
+                    // Fetch from your FastAPI Uninsured Endpoint
+                    const response = await fetch(`${API_BASE}/api/recommend-policy`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!response.ok) throw new Error("Backend error");
+                    const data = await response.json();
+                    
+                    // Render the UI
+                    clearInterval(interval);
+                    loader.classList.add('hidden');
+                    document.getElementById(`form-${mode}`).classList.remove('hidden');
+                    renderPolicyResults(data);
+
+                } else {
+                    // Gather input
+                    const payload = {
+                        provider: document.getElementById('i-provider').value,
+                        city: document.getElementById('i-city').value
+                    };
+
+                    // Fetch from your FastAPI Insured Endpoint
+                    const response = await fetch(`${API_BASE}/api/check-network`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!response.ok) throw new Error("Backend error");
+                    const data = await response.json();
+                    
+                    // Render the UI
+                    clearInterval(interval);
+                    loader.classList.add('hidden');
+                    document.getElementById(`form-${mode}`).classList.remove('hidden');
+                    renderHospitalResults(data);
+                }
+            } catch (error) {
+                console.error("Failed to fetch from backend:", error);
+                clearInterval(interval);
+                loader.classList.add('hidden');
+                document.getElementById(`form-${mode}`).classList.remove('hidden');
+                alert("Connection Failed! Make sure your Antigravity IDE terminal is running 'uvicorn main:app --reload'.");
+            }
+        }
+
+        // --- 3. RENDERING LOGIC (Mapping JSON to your Cards) ---
+        function renderPolicyResults(policies) {
+            const container = document.getElementById('results-content');
+            document.getElementById('results-container').classList.remove('hidden');
+            container.innerHTML = ''; 
+
+            policies.forEach((policy, index) => {
+                const isTopMatch = index === 0;
+                
+                // Account for snake_case coming from Python Backend
+                const sumInsured = policy.sum_insured || "N/A";
+                const roomRent = policy.room_rent || "N/A";
+                const pedWaiting = policy.ped_waiting || "N/A";
+                const aiReasoning = policy.ai_reasoning || "Match found.";
+
+                // Safely check strings for coloring logic
+                const isRoomGreen = String(roomRent).toLowerCase().includes('no limit');
+                const isWaitGreen = String(pedWaiting).toLowerCase().includes('day 1');
+
+                container.innerHTML += `
+                    <div class="bg-white border ${isTopMatch ? 'border-primary ring-1 ring-primary' : 'border-slate-200'} rounded-xl p-5 shadow-sm relative fade-in" style="animation-delay: ${index * 0.1}s">
+                        ${isTopMatch ? '<div class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-primary text-white text-xs font-bold px-3 py-1 rounded-full shadow-md"><i class="ph ph-star"></i> AI Top Match</div>' : ''}
+                        
+                        <div class="flex justify-between items-start mb-4 mt-2">
+                            <div>
+                                <h4 class="font-bold text-slate-900">${policy.name}</h4>
+                                <p class="text-xs text-slate-500">${policy.provider || 'Provider'}</p>
+                            </div>
+                            <span class="font-bold text-lg text-slate-800">${policy.price || '₹---'}</span>
+                        </div>
+
+                        <div class="space-y-3 mb-4 border-t border-slate-100 pt-4">
+                            <div class="flex items-center text-sm">
+                                <i class="ph ph-shield-check text-green-500 mr-2 text-lg"></i>
+                                <span class="text-slate-600 w-24">Cover:</span>
+                                <span class="font-semibold text-slate-800">${sumInsured}</span>
+                            </div>
+                            <div class="flex items-center text-sm">
+                                <i class="ph ph-bed text-blue-500 mr-2 text-lg"></i>
+                                <span class="text-slate-600 w-24">Room Rent:</span>
+                                <span class="font-semibold ${isRoomGreen ? 'text-green-600' : 'text-orange-600'}">${roomRent}</span>
+                            </div>
+                            <div class="flex items-center text-sm">
+                                <i class="ph ph-hourglass text-purple-500 mr-2 text-lg"></i>
+                                <span class="text-slate-600 w-24">Waiting:</span>
+                                <span class="font-semibold ${isWaitGreen ? 'text-green-600' : 'text-slate-800'}">${pedWaiting}</span>
+                            </div>
+                        </div>
+
+                        <div class="bg-blue-50 rounded-lg p-3 text-sm">
+                            <div class="flex items-start gap-2">
+                                <i class="ph-fill ph-sparkle text-primary mt-0.5"></i>
+                                <p class="text-slate-700 leading-snug"><span class="font-semibold text-primary">AI Logic:</span> ${aiReasoning}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function renderHospitalResults(hospitals) {
+            const container = document.getElementById('results-content');
+            document.getElementById('results-container').classList.remove('hidden');
+            container.innerHTML = '';
+
+            hospitals.forEach((hosp, index) => {
+                // Ensure Python boolean is handled properly
+                const isCashless = hosp.is_cashless === true || hosp.is_cashless === "true";
+
+                container.innerHTML += `
+                    <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm fade-in" style="animation-delay: ${index * 0.1}s">
+                        
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-slate-900 text-lg">${hosp.name}</h4>
+                            <span class="text-sm font-medium text-slate-500 flex items-center"><i class="ph ph-map-pin mr-1"></i> ${hosp.distance || ''}</span>
+                        </div>
+
+                        ${isCashless 
+                            ? `<div class="bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center mb-4">
+                                <i class="ph-fill ph-check-circle mr-2 text-lg"></i> Cashless Compatible
+                               </div>`
+                            : `<div class="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center mb-4">
+                                <i class="ph-fill ph-warning-circle mr-2 text-lg"></i> Reimbursement Only (Not in Network)
+                               </div>`
+                        }
+
+                        <div class="text-sm text-slate-600 flex justify-between items-center border-t border-slate-100 pt-3">
+                            <span>Historically approved claims:</span>
+                            <span class="font-bold text-green-600">92%</span> <!-- Static placeholder -->
                         </div>
                     </div>
                 `;
